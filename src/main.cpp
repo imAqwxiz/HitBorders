@@ -83,7 +83,7 @@ class $modify(AqwxizHitbordersPlayLayer, PlayLayer) {
     }
 
     void onExit() {
-        auto* fields = m_fields;
+        auto fields = m_fields;
         fields->drawNode = nullptr;
         PlayLayer::onExit();
     }
