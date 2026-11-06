@@ -1,3 +1,4 @@
+
 #include <Geode/Geode.hpp>
 #include <Geode/modify/PlayLayer.hpp>
 
@@ -25,6 +26,7 @@ namespace {
         if (!box) return;
 
         const auto& corners = box->m_corners;
+
         for (size_t i = 0; i < corners.size(); ++i) {
             draw->drawSegment(
                 corners[i],
@@ -44,47 +46,50 @@ class $modify(AqwxizHitbordersPlayLayer, PlayLayer) {
     void postUpdate(float dt) {
         PlayLayer::postUpdate(dt);
 
-        auto* fields = m_fields;
-        if (!fields->drawNode) {
-            fields->drawNode = CCDrawNode::create();
-            if (!fields->drawNode) return;
+        // Create the renderer once.
+        if (!m_fields->drawNode) {
+            auto* node = CCDrawNode::create();
+            if (!node || !m_objectLayer) return;
 
-            // Collision coordinates belong to the gameplay object layer.
-            // Keeping the renderer there avoids mixing screen and world coordinates.
-            if (m_objectLayer) {
-                m_objectLayer->addChild(fields->drawNode, 9999);
-            } else {
-                fields->drawNode = nullptr;
-                return;
-            }
+            m_fields->drawNode = node;
+            m_objectLayer->addChild(node, 9999);
         }
 
-        auto* draw = fields->drawNode;
+        auto* draw = m_fields->drawNode;
         draw->clear();
 
-        // Player collision geometry: use the game's oriented bounding box.
+        // Player collision boundaries.
         const ccColor4F playerColor(0.20f, 0.85f, 1.00f, 1.00f);
+
         drawPlayerOBB(draw, m_player1, playerColor);
         drawPlayerOBB(draw, m_player2, playerColor);
 
-        // Solid collision objects: use Geometry Dash's object collision rect.
+        // Solid objects.
         const ccColor4F solidColor(1.00f, 0.85f, 0.20f, 1.00f);
+
         for (auto* object : m_solidCollisionObjects) {
             if (!object || !object->isVisible()) continue;
+
             drawRectOutline(draw, object->getObjectRect(), solidColor);
         }
 
-        // Hazard collision objects.
+        // Hazard objects.
         const ccColor4F hazardColor(1.00f, 0.25f, 0.30f, 1.00f);
+
         for (auto* object : m_hazardCollisionObjects) {
             if (!object || !object->isVisible()) continue;
+
             drawRectOutline(draw, object->getObjectRect(), hazardColor);
         }
     }
 
     void onExit() {
-        auto fields = m_fields;
-        fields->drawNode = nullptr;
+        if (m_fields->drawNode) {
+            m_fields->drawNode->removeFromParent();
+            m_fields->drawNode = nullptr;
+        }
+
         PlayLayer::onExit();
     }
 };
+
