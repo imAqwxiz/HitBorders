@@ -1,0 +1,40 @@
+
+name: Build Aqwxiz Hitborders
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build (${{ matrix.platform }})
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - Android
+          - Windows
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup Geode SDK
+        uses: geode-sdk/cli@main
+
+      - name: Build mod
+        run: geode build -p ${{ matrix.platform }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AqwxizHitborders-${{ matrix.platform }}
+          path: build/**/*.geode
+          if-no-files-found: error
+
