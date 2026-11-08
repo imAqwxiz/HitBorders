@@ -36,19 +36,33 @@ inline Pts hull(Pts p) {
     return h;
 }
 
+// Radius of a round hitbox (saws, orbs). Uses the game's own radius (scaled by the
+// object's size) when it agrees with the hitbox rect, otherwise falls back to the rect.
+inline float roundRadius(GameObject* obj, float rectRadius) {
+    float base = obj->m_objectRadius;
+    float scale = std::max(std::fabs(obj->getScaleX()), std::fabs(obj->getScaleY()));
+    float candidates[2] = {base * scale, base};
+    for (float c : candidates) {
+        if (c > 0.f && std::fabs(c - rectRadius) <= rectRadius * 0.15f) return c;
+    }
+    return rectRadius;
+}
+
 // Exact hitbox of an object as a convex polygon:
-//  - round objects (saws, orbs): 16-gon circle
-//  - slopes (triangle = true): right triangle, honoring flip + rotation
+//  - round objects (saws, orbs): 32-gon circle
+//  - slopes (triangle = true): right triangle, honoring flip + rotation.
+//    `variant` (0..3) says which corner the sprite's right angle is on when NOT flipped
+//    (bit 0 = mirrored horizontally, bit 1 = mirrored vertically); 0 = right angle bottom-right.
 //  - everything else: rectangle, honoring rotation (incl. non-90 angles)
-inline Pts shapeOf(GameObject* obj, bool triangle) {
+inline Pts shapeOf(GameObject* obj, bool triangle, int variant = 0) {
     Pts out;
     auto r = obj->getObjectRect();
     float cx = r.getMidX(), cy = r.getMidY();
 
     if (obj->m_objectRadius > 0.f) {
-        float rad = std::min(r.size.width, r.size.height) * 0.5f;
-        for (int i = 0; i < 16; i++) {
-            float a = static_cast<float>(i) * 0.3926991f; // 2*pi/16
+        float rad = roundRadius(obj, std::min(r.size.width, r.size.height) * 0.5f);
+        for (int i = 0; i < 32; i++) {
+            float a = static_cast<float>(i) * 0.19634954f; // 2*pi/32
             out.push_back(cocos2d::CCPoint(cx + std::cos(a) * rad, cy + std::sin(a) * rad));
         }
         return out;
@@ -66,9 +80,9 @@ inline Pts shapeOf(GameObject* obj, bool triangle) {
 
     std::vector<std::pair<float, float>> local;
     if (triangle) {
-        // default slope: right angle at bottom-right (ramp going up to the right)
         local = {{-hw, -hh}, {hw, -hh}, {hw, hh}};
-        bool fx = obj->isFlipX(), fy = obj->isFlipY();
+        bool fx = obj->isFlipX() != ((variant & 1) != 0);
+        bool fy = obj->isFlipY() != ((variant & 2) != 0);
         for (auto& p : local) {
             if (fx) p.first = -p.first;
             if (fy) p.second = -p.second;
@@ -101,6 +115,23 @@ inline Pts expand(Pts const& shape, float hw, float hh) {
         all.push_back(cocos2d::CCPoint(p.x - hw, p.y + hh));
     }
     return hull(all);
+}
+
+// Signed distance from a point to a convex counter-clockwise polygon
+// (negative inside, ~0 on the edge, positive outside).
+inline float signedDist(Pts const& poly, cocos2d::CCPoint const& p) {
+    if (poly.size() < 3) return 1e9f;
+    float best = -1e9f;
+    for (size_t i = 0; i < poly.size(); i++) {
+        auto const& a = poly[i];
+        auto const& b = poly[(i + 1) % poly.size()];
+        float dx = b.x - a.x, dy = b.y - a.y;
+        float len = std::sqrt(dx * dx + dy * dy);
+        if (len < 1e-6f) continue;
+        float d = (dy * (p.x - a.x) - dx * (p.y - a.y)) / len;
+        best = std::max(best, d);
+    }
+    return best;
 }
 
 }

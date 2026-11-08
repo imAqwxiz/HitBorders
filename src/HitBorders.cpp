@@ -84,6 +84,16 @@ struct Trail {
 
 Trail g_trails[2]; // [0] = player 1, [1] = player 2
 
+// Which way a slope sprite faces when unflipped isn't something I can read from the game
+// directly, so the mod learns it: while you ride slopes, the layout whose border your
+// center follows gets votes, and the winner is used (and remembered between sessions).
+int g_slopeVotes[4] = {0, 0, 0, 0};
+
+int& slopeVariant() {
+    static int v = Mod::get()->getSavedValue<int>("slope-variant", 0);
+    return v;
+}
+
 // Called after EVERY physics step (not just every frame), so the trail follows the
 // real path instead of cutting straight lines between frames.
 void sampleTrail(PlayerObject* p, int i) {
@@ -202,6 +212,43 @@ class $modify(HBPlayLayer, PlayLayer) {
         }
     }
 
+    void hbLearnSlopes(float cx, float cy, float ow, float oh) {
+        auto& cache = m_fields->cache;
+        CCPoint c(cx, cy);
+        auto it = std::lower_bound(cache.begin(), cache.end(), cx - 150.f, [](Entry const& e, float v) {
+            return e.x < v;
+        });
+
+        bool voted = false;
+        for (; it != cache.end() && it->x <= cx + 150.f; ++it) {
+            if (!it->slope) continue;
+            auto rect = it->obj->getObjectRect();
+            if (std::abs(rect.getMidX() - cx) > 120.f || std::abs(rect.getMidY() - cy) > 120.f) continue;
+
+            for (int v = 0; v < 4; v++) {
+                auto zone = hb::expand(hb::shapeOf(it->obj, true, v), ow, oh);
+                if (std::abs(hb::signedDist(zone, c)) < 3.f) {
+                    g_slopeVotes[v]++;
+                    voted = true;
+                }
+            }
+        }
+        if (!voted) return;
+
+        int best = 0;
+        for (int v = 1; v < 4; v++) {
+            if (g_slopeVotes[v] > g_slopeVotes[best]) best = v;
+        }
+        int& cur = slopeVariant();
+        if (best != cur && g_slopeVotes[best] > g_slopeVotes[cur] + 8) {
+            cur = best;
+            Mod::get()->setSavedValue<int>("slope-variant", cur);
+        }
+        if (g_slopeVotes[best] > 2000) {
+            for (int v = 0; v < 4; v++) g_slopeVotes[v] /= 2;
+        }
+    }
+
     void hbRedraw() {
         auto node = m_fields->node;
         if (!node) return;
@@ -230,6 +277,12 @@ class $modify(HBPlayLayer, PlayLayer) {
             boxes.push_back({ow, oh, std::max(ow * INNER_RATIO, 0.5f), std::max(oh * INNER_RATIO, 0.5f)});
         }
 
+        // learn slope direction from where the player actually rides
+        if (m_player1 && !m_player1->m_isDead && !boxes.empty()) {
+            auto pr = m_player1->getObjectRect();
+            this->hbLearnSlopes(pr.getMidX(), pr.getMidY(), boxes[0].ow, boxes[0].oh);
+        }
+
         // 1) collect the regions the player's center can't (or shouldn't) be in
         std::vector<Draw> draws;
         auto& cache = m_fields->cache;
@@ -241,7 +294,7 @@ class $modify(HBPlayLayer, PlayLayer) {
             auto rect = it->obj->getObjectRect();
             if (rect.getMaxY() < bottom || rect.getMinY() > top) continue;
 
-            auto shape = hb::shapeOf(it->obj, it->slope);
+            auto shape = hb::shapeOf(it->obj, it->slope, slopeVariant());
             for (size_t i = 0; i < boxes.size(); i++) {
                 float mul = i == 0 ? 1.f : 0.6f; // P2 a bit fainter
                 auto const& bx = boxes[i];
