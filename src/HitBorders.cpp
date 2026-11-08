@@ -121,8 +121,8 @@ struct Draw {
 
 class $modify(HBBaseLayer, GJBaseGameLayer) {
     // one physics step
-    void processCommands(float dt) {
-        GJBaseGameLayer::processCommands(dt);
+    void processCommands(float dt, bool isHalfTick, bool isLastTick) {
+        GJBaseGameLayer::processCommands(dt, isHalfTick, isLastTick);
 
         if (!hb::enabled()) {
             g_trails[0].clear();
