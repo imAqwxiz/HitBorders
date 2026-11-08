@@ -36,16 +36,17 @@ inline Pts hull(Pts p) {
     return h;
 }
 
-// Hitbox of an object as a convex polygon (rect, rotated rect, or circle).
-inline Pts shapeOf(GameObject* obj) {
+// Exact hitbox of an object as a convex polygon:
+//  - round objects (saws, orbs): 16-gon circle
+//  - slopes (triangle = true): right triangle, honoring flip + rotation
+//  - everything else: rectangle, honoring rotation (incl. non-90 angles)
+inline Pts shapeOf(GameObject* obj, bool triangle) {
     Pts out;
     auto r = obj->getObjectRect();
     float cx = r.getMidX(), cy = r.getMidY();
-    float hw = r.size.width * 0.5f, hh = r.size.height * 0.5f;
 
-    // round hazards (saws etc.)
     if (obj->m_objectRadius > 0.f) {
-        float rad = std::min(hw, hh);
+        float rad = std::min(r.size.width, r.size.height) * 0.5f;
         for (int i = 0; i < 16; i++) {
             float a = static_cast<float>(i) * 0.3926991f; // 2*pi/16
             out.push_back(cocos2d::CCPoint(cx + std::cos(a) * rad, cy + std::sin(a) * rad));
@@ -53,31 +54,43 @@ inline Pts shapeOf(GameObject* obj) {
         return out;
     }
 
-    float rot = std::fmod(obj->getRotation(), 90.f);
-    if (rot < 0.f) rot += 90.f;
+    float rot = obj->getRotation();
+    int quarter = static_cast<int>(std::lround(rot / 90.f));
+    bool ortho = std::fabs(rot - static_cast<float>(quarter) * 90.f) < 0.5f;
 
-    // axis-aligned (0/90/180/270)
-    if (rot < 0.5f || rot > 89.5f) {
-        out.push_back(cocos2d::CCPoint(cx - hw, cy - hh));
-        out.push_back(cocos2d::CCPoint(cx + hw, cy - hh));
-        out.push_back(cocos2d::CCPoint(cx + hw, cy + hh));
-        out.push_back(cocos2d::CCPoint(cx - hw, cy + hh));
-        return out;
+    // getObjectRect() of a 90/270 rotated object has width/height swapped: undo that
+    // to get the un-rotated size, then rotate the real shape ourselves.
+    float uw = r.size.width, uh = r.size.height;
+    if (ortho && (quarter & 1)) std::swap(uw, uh);
+    float hw = uw * 0.5f, hh = uh * 0.5f;
+
+    std::vector<std::pair<float, float>> local;
+    if (triangle) {
+        // default slope: right angle at bottom-right (ramp going up to the right)
+        local = {{-hw, -hh}, {hw, -hh}, {hw, hh}};
+        bool fx = obj->isFlipX(), fy = obj->isFlipY();
+        for (auto& p : local) {
+            if (fx) p.first = -p.first;
+            if (fy) p.second = -p.second;
+        }
+    } else {
+        local = {{-hw, -hh}, {hw, -hh}, {hw, hh}, {-hw, hh}};
     }
 
-    // arbitrary rotation (cocos rotation is clockwise degrees)
-    float a = -obj->getRotation() * 0.017453293f;
+    // cocos rotation is clockwise degrees
+    float a = -rot * 0.017453293f;
     float ca = std::cos(a), sa = std::sin(a);
-    float xs[4] = {-hw, hw, hw, -hw};
-    float ys[4] = {-hh, -hh, hh, hh};
-    for (int i = 0; i < 4; i++) {
-        out.push_back(cocos2d::CCPoint(cx + xs[i] * ca - ys[i] * sa, cy + xs[i] * sa + ys[i] * ca));
+    for (auto const& p : local) {
+        out.push_back(cocos2d::CCPoint(
+            cx + p.first * ca - p.second * sa,
+            cy + p.first * sa + p.second * ca
+        ));
     }
     return out;
 }
 
 // Minkowski sum of a convex shape with a (2hw x 2hh) rectangle:
-// the area where the CENTER of a player with that hitbox would collide.
+// the area where the CENTER of a player with that hitbox would touch the shape.
 inline Pts expand(Pts const& shape, float hw, float hh) {
     Pts all;
     all.reserve(shape.size() * 4);
